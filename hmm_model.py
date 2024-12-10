@@ -3,6 +3,8 @@ from pomegranate.distributions import Categorical
 from collections import Counter
 import numpy as np
 
+import annotate_cpg
+
 #
 # # Sample training data: List of tuples (sequence, annotation)
 # training_data = [
@@ -88,3 +90,30 @@ y_hat = model.predict(X)
 
 print("sequence: {}".format(''.join(sequence)))
 print("hmm pred: {}".format(''.join([str(y.item()) for y in y_hat[0]])))
+
+
+training_sequences_path = r"C:\Users\roise\OneDrive\Desktop\Hebrew U\CBIO\ex2\data\CpG-islands.2K.seq.fa.gz"
+training_labels_path = r"C:\Users\roise\OneDrive\Desktop\Hebrew U\CBIO\ex2\data\CpG-islands.2K.lbl.fa.gz"
+
+# Prepare training data and train model
+training_data = annotate_cpg.prepare_training_data(training_sequences_path, training_labels_path)
+
+
+# find the emission probabilities for each state
+def get_probs(training_data):
+    nucleotides = ["A", "C", "G", "T"]
+    cpg_counts = Counter()
+    non_cpg_counts = Counter()
+    cpg_probs = {}
+    non_cpg_probs = {}
+    for sequence, annotation in training_data:
+        for nucleotide, state in zip(sequence, annotation):
+            if state == "C":
+                cpg_counts[nucleotide] += 1
+            elif state == "N":
+                non_cpg_counts[nucleotide] += 1
+        cpg_total = sum(cpg_counts.values())
+        non_cpg_total = sum(non_cpg_counts.values())
+        cpg_probs = {nuc: cpg_counts[nuc] / cpg_total for nuc in nucleotides}
+        non_cpg_probs = {nuc: non_cpg_counts[nuc] / non_cpg_total for nuc in nucleotides}
+    return cpg_probs, non_cpg_probs
