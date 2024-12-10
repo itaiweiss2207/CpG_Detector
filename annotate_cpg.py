@@ -104,12 +104,12 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    training_sequences_path = r"data/CpG-islands.2K.seq.fa.gz"
-    training_labels_path = r"data/CpG-islands.2K.lbl.fa.gz"
+    training_sequences_path = r"C:\Users\roise\OneDrive\Desktop\Hebrew U\CBIO\ex2\data\CpG-islands.2K.seq.fa.gz"
+    training_labels_path = r"C:\Users\roise\OneDrive\Desktop\Hebrew U\CBIO\ex2\data\CpG-islands.2K.lbl.fa.gz"
 
     # Prepare training data and train model
     training_data = prepare_training_data(training_sequences_path, training_labels_path)
     classifier = train_classifier(training_data)
 
     # Annotate sequences and save predictions
-    annotate_fasta_file(classifier, args.fasta_path, args.output_path)
+    # annotate_fasta_file(classifier, args.fasta_path, args.output_file)
