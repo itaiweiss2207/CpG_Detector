@@ -102,7 +102,8 @@ def loss_over_dataset(data, model):
     loss = loss / len(data)
     precision = tp / (tp + fp)
     recall = tp / (tp + fn)
-    return loss, recall, precision
+    F1 = 2 * (precision * recall) / (precision + recall)
+    return loss, recall, precision, F1
 
 
 def train_model(train_set):
@@ -140,13 +141,13 @@ def train_model(train_set):
 
 if __name__ == "__main__":
 
-    for proportion in [0.25, 0.5, 0.75]:
+    for proportion in [0.75]:
         # split the data into training and testing sets
         train, test = (training_data[:int(len(training_data) * proportion)],
                        training_data[int(len(training_data) * proportion):])
         model = train_model(train)
         print("proportion: {} \n".format(proportion))
-        print("loss, recall, precision over training set: {} \n".format(loss_over_dataset(train, model)))
+        print("loss, recall, precision, F1 over training set: {} \n".format(loss_over_dataset(train, model)))
 
 # sequence = 'CGACTACTGACTACTCGCCGACGCGACTGCCGTCTATACTGCGCATACGGC'
 # X = np.array([[[['A', 'C', 'G', 'T'].index(char)] for char in sequence]])
