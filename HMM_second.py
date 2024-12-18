@@ -15,44 +15,61 @@ training_data = [pair for pair in training_data if all(char in "AGCT" for char i
 
 
 # Find emission probabilities
-def get_emission_probs(data):
+def get_second_order_emission_probs(data):
     nucleotides = ["A", "C", "G", "T"]
-    cpg_counts = Counter()
-    non_cpg_counts = Counter()
+    NN_counts = Counter()
+    NC_counts = Counter()
+    CN_counts = Counter()
+    CC_counts = Counter()
 
     for seq, annotation in data:
-        for nucleotide, state in zip(seq, annotation):
-            if state == "C":
-                cpg_counts[nucleotide] += 1
-            elif state == "N":
-                non_cpg_counts[nucleotide] += 1
+        for i in range(1, len(annotation) - 1):
+            if annotation[i] == "C":
+                if annotation[i + 1] == "C":
+                    CC_counts[seq[i]] += 1
+                else:
+                    CN_counts[seq[i]] += 1
+            else:
+                if annotation[i + 1] == "C":
+                    NC_counts[seq[i]] += 1
+                else:
+                    NN_counts[seq[i]] += 1
 
-    cpg_total = sum(cpg_counts.values())
-    non_cpg_total = sum(non_cpg_counts.values())
-    cpg_probs = {nuc: cpg_counts[nuc] / cpg_total for nuc in nucleotides}
-    non_cpg_probs = {nuc: non_cpg_counts[nuc] / non_cpg_total for nuc in nucleotides}
 
-    return cpg_probs, non_cpg_probs
+    cpg_total = sum(NC_counts.values()) + sum(CC_counts.values())
+    non_cpg_total = sum(CN_counts.values()) + sum(NN_counts.values())
+    NN_probs = {nuc: NN_counts[nuc] / non_cpg_total for nuc in nucleotides}
+    NC_probs = {nuc: NC_counts[nuc] / non_cpg_total for nuc in nucleotides}
+    CN_probs = {nuc: CN_counts[nuc] / cpg_total for nuc in nucleotides}
+    CC_probs = {nuc: CC_counts[nuc] / cpg_total for nuc in nucleotides}
+
+    return NN_probs, NC_probs, CN_probs, CC_probs
 
 
 # Second-order transition probabilities
-def get_second_order_transition_probs(data):
-    transitions = Counter()
+def get_second_order_transition_probs(data, smoothing=1e-6):
+    transitions = {
+        "CC->CC": 0, "CC->CN": 0, "CN->NC": 0, "CN->NN": 0,
+        "NC->CC": 0, "NC->CN": 0, "NN->NC": 0, "NN->NN": 0
+    }
 
+    # Count transitions
     for seq, annotation in data:
-        for i in range(2, len(annotation)):
+        for i in range(2, len(annotation)):  # Start from the third position for second-order
             prev_pair = annotation[i - 2] + annotation[i - 1]
-            current_state = annotation[i]
-            key = (prev_pair, current_state)
-            transitions[key] += 1
+            curr_pair = annotation[i - 1] + annotation[i]
+            key = f"{prev_pair}->{curr_pair}"
+            if key in transitions:
+                transitions[key] += 1
 
-    # Normalize transitions
-    transition_probs = {}
-    for (prev_pair, current_state), count in transitions.items():
-        total = sum(transitions[(prev_pair, s)] for s in "CN")
-        transition_probs[(prev_pair, current_state)] = count / total
+    # Add smoothing and normalize
+    normalized_transitions = {}
+    for key, count in transitions.items():
+        prev_state = key.split("->")[0]
+        total = sum(value + smoothing for k, value in transitions.items() if k.startswith(prev_state))
+        normalized_transitions[key] = (count + smoothing) / total
 
-    return transition_probs
+    return normalized_transitions
 
 
 # Starting probabilities for second-order HMM
@@ -66,33 +83,41 @@ def get_starting_probs(data):
 
 
 # Train a second-degree HMM
-def train_second_order_hmm(train_set):
-    cpg_probs, non_cpg_probs = get_emission_probs(train_set)
-    transition_probs = get_second_order_transition_probs(train_set)
+def train_second_order_hmm_with_emissions(train_set):
+    # Step 1: Get emission probabilities
+    NN_probs, NC_probs, CN_probs, CC_probs = get_second_order_emission_probs(train_set)
+
+    # Step 2: Define categorical distributions for each state pair
+    NN_distribution = Categorical([[NN_probs["A"], NN_probs["C"], NN_probs["G"], NN_probs["T"]]])
+    NC_distribution = Categorical([[NC_probs["A"], NC_probs["C"], NC_probs["G"], NC_probs["T"]]])
+    CN_distribution = Categorical([[CN_probs["A"], CN_probs["C"], CN_probs["G"], CN_probs["T"]]])
+    CC_distribution = Categorical([[CC_probs["A"], CC_probs["C"], CC_probs["G"], CC_probs["T"]]])
+
+    # Step 3: Transition probabilities (same as first order)
+    transition_probs = get_second_order_transition_probs(train_set)  # Should still return {"CC", "CN", "NC", "NN"}
     starting_probs = get_starting_probs(train_set)
 
-    print("Emission probabilities (CpG):", cpg_probs)
-    print("Emission probabilities (Non-CpG):", non_cpg_probs)
-    print("Starting probabilities:", starting_probs)
-    print("Transition probabilities:", transition_probs)
-
-    # Emission distributions
-    distribution_cpg = Categorical([[cpg_probs["A"], cpg_probs["C"], cpg_probs["G"], cpg_probs["T"]]])
-    distribution_non_cpg = Categorical([[non_cpg_probs["A"], non_cpg_probs["C"], non_cpg_probs["G"], non_cpg_probs["T"]]])
-
-    # Build model
+    # Step 4: Build the HMM
     model = DenseHMM()
-    model.add_distributions([distribution_cpg, distribution_non_cpg])
 
-    # Add second-order transitions
-    for prev_pair in ["CC", "CN", "NC", "NN"]:
-        for current_state, distribution in zip("CN", [distribution_cpg, distribution_non_cpg]):
-            prob = transition_probs.get((prev_pair, current_state), 0.000001)  # Small prob if missing
-            model.add_edge(prev_pair, distribution, prob)
+    # Add distributions (augmented states)
+    model.add_distributions([CC_distribution, CN_distribution, NC_distribution, NN_distribution])
 
-    # Starting edges for state pairs
-    for pair, prob in starting_probs.items():
-        model.add_edge(model.start, pair, prob)
+    # Add edges for starting probabilities
+    model.add_edge(model.start, CC_distribution, 0.00001)
+    model.add_edge(model.start, CN_distribution, 0.00001)
+    model.add_edge(model.start, NC_distribution, 0.00001)
+    model.add_edge(model.start, NN_distribution, 1)
+
+    # Add transitions between augmented states
+    model.add_edge(CC_distribution, CC_distribution, transition_probs["CC->CC"])
+    model.add_edge(CC_distribution, CN_distribution, transition_probs["CC->CN"])
+    model.add_edge(CN_distribution, NC_distribution, transition_probs["CN->NC"])
+    model.add_edge(CN_distribution, NN_distribution, transition_probs["CN->NN"])
+    model.add_edge(NC_distribution, CC_distribution, transition_probs["NC->CC"])
+    model.add_edge(NC_distribution, CN_distribution, transition_probs["NC->CN"])
+    model.add_edge(NN_distribution, NC_distribution, transition_probs["NN->NC"])
+    model.add_edge(NN_distribution, NN_distribution, transition_probs["NN->NN"])
 
     return model
 
@@ -120,5 +145,13 @@ def loss_over_dataset(data, model):
 if __name__ == "__main__":
     proportion = 0.75
     train, test = training_data[:int(len(training_data) * proportion)], training_data[int(len(training_data) * proportion):]
-    model = train_second_order_hmm(train)
+    model = train_second_order_hmm_with_emissions(train)
+    for seq, annotation in test[0:2]:
+        X = np.array([[[['A', 'C', 'G', 'T'].index(char)] for char in seq]])
+        y_hat = model.predict(X)
+        y_hat_string = ''.join([str(y.item()) for y in y_hat[0]])
+        y_hat_states = ''.join(["C" if y.item() == 0 else "N" for y in y_hat[0]])
+        print("hmm orig: " + annotation)
+        print("hmm pred: " + y_hat_states)
+        print(hmm_model.loss_over_sequence(annotation, y_hat_states))
     print("Loss, Recall, Precision, F1 over training set:", loss_over_dataset(train, model))
