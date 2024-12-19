@@ -5,7 +5,7 @@ import numpy as np
 from hmmlearn import hmm
 from hmmlearn.base import _BaseHMM
 from matplotlib import pyplot as plt
-from sklearn.metrics import auc
+from sklearn.metrics import auc, roc_curve, roc_auc_score
 
 import annotate_cpg
 import hmm_model
@@ -147,7 +147,8 @@ def loss_over_dataset(data, model):
     precision = tp / (tp + fp)
     recall = tp / (tp + fn)
     F1 = 2 * (precision * recall) / (precision + recall)
-    return loss, recall, precision, F1
+    balanced_accuracy = (tp / (tp + fn) + tn / (tn + fp)) / 2
+    return loss, recall, precision, F1, balanced_accuracy
 
 
 def train_ensemble(train_data, num_models, pct_data_per_model=0.8):
@@ -197,8 +198,7 @@ def compute_roc_curve_single_model(data, model):
             encoded_seq = encode_sequence(seq)
 
             # Get posterior probabilities for each state (shape: [len(seq), n_states])
-            log_prob = model._compute_log_likelihood(encoded_seq)
-            state_probs = np.exp(log_prob)  # Convert log probabilities to probabilities
+            state_probs = model.predict_proba(encoded_seq)
 
             # Get "C" state probabilities
             c_probs = state_probs[:, 1]  # Column for the CpG ("C") state
@@ -239,6 +239,27 @@ def compute_roc_curve_single_model(data, model):
 
     return tpr_list, fpr_list, roc_auc
 
+def roc_curve_ft_noam(data, model):
+    y_true = []
+    y_pred_prob = []
+
+    for seq, annotation in data:
+        encoded_seq = encode_sequence(seq)
+        state_probs = model.predict_proba(encoded_seq)
+        y_pred_prob.extend(state_probs[:, 1])
+        y_true.extend([1 if char == "C" else 0 for char in annotation])
+
+    fpr, tpr, thresholds = roc_curve(y_true, y_pred_prob)
+    f1 = 2 * tpr * (1 - fpr) / (tpr + 1 - fpr)
+    print("Best F1: ", max(f1))
+    # plot curve
+    plt.plot(fpr, tpr)
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('ROC Curve, AUC = ' + str(roc_auc_score(y_true, y_pred_prob)))
+    plt.show()
+
+
 
 if __name__ == "__main__":
 
@@ -257,22 +278,21 @@ if __name__ == "__main__":
         if invalid_chars:
             print(f"Invalid characters in sequence: {invalid_chars}")
 
-    for proportion in [0.75]:
+    for proportion in [0.7, 0.8, 0.9]:
         train = all_data[:int(len(all_data) * proportion)]
         test = all_data[int(len(all_data) * proportion):]
         model = train_model(train)
 
         print("Proportion: {} \n".format(proportion))
-        print("Loss, recall, precision, F1 over training set: {} \n".format(
+        print("Loss, recall, precision, F1, b_acc over training set: {} \n".format(
             loss_over_dataset(train, model)
         ))
-        print("Loss, recall, precision, F1 over test set: {} \n".format(
-            loss_over_dataset(test, model)
-        ))
+        print("Loss, recall, precision, F1, b_acc over test set: {} \n".format(
+             loss_over_dataset(test, model)
+         ))
 
         # Compute ROC curve for the single model
-        _, _, auc = compute_roc_curve_single_model(test, model)
-        print(auc)
+        roc_curve_ft_noam(test, model)
 
 
     #
